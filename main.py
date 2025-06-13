@@ -126,7 +126,7 @@ def main(args):
     if not args.distributed or utils.is_main_process():
         try:
             user_secrets = UserSecretsClient()
-            os.environ["WANDB_API_KEY"] = user_secrets.get_secret("WANDB_API_KEY")
+            os.environ["WANDB_API_KEY"] = user_secrets.get_secret("wandb")
         except Exception as e:
             print(f"Warning: Could not set WANDB_API_KEY from Kaggle Secrets: {e}")
             print("Please ensure you have logged in to WandB manually using `wandb login` or set WANDB_API_KEY environment variable.")
