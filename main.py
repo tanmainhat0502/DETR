@@ -171,7 +171,7 @@ def main(args):
         from datasets import coco
         dataset_train = coco.build('train', args)
         dataset_val = coco.build('val', args)
-        base_ds = get_coco_api_from_dataset(dataset_val)    
+    base_ds = get_coco_api_from_dataset(dataset_val)    
 
     output_dir = Path(args.output_dir)
 
