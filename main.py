@@ -15,7 +15,16 @@ import util.misc as utils
 from datasets import build_dataset, get_coco_api_from_dataset
 from engine import evaluate, train_one_epoch
 from models import build_model
+import wandb  # Thêm WandB
+import torch.distributed as dist
+import atexit
 
+def cleanup():
+    if dist.is_initialized():
+        dist.destroy_process_group()
+    if not utils.is_dist_avail_and_initialized() or utils.is_main_process():
+        wandb.finish()  # Kết thúc WandB run khi thoát
+atexit.register(cleanup)
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
@@ -100,10 +109,27 @@ def get_args_parser():
     parser.add_argument('--world_size', default=1, type=int,
                         help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
+    
+    # WandB parameters
+    parser.add_argument('--wandb_project', default='detr-emotic', type=str, help='WandB project name')
+    parser.add_argument('--wandb_entity', default=None, type=str, help='WandB entity (username or team)')
     return parser
 
-
 def main(args):
+    # Khởi tạo WandB (chỉ trên rank 0 nếu dùng DDP)
+    if not args.distributed or utils.is_main_process():
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            config=vars(args),  # Log toàn bộ args
+            name=f"detr-r50-emotic-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}",  # Tên run
+        )
+        wandb.config.update({
+            "checkpoint": args.resume,
+            "backbone": args.backbone,
+            "num_classes": args.num_classes,
+        })
+
     utils.init_distributed_mode(args)
     print("git:\n  {}\n".format(utils.get_sha()))
 
@@ -123,16 +149,19 @@ def main(args):
     model_without_ddp = model
     model.to(device)
 
-
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(
             model, 
             device_ids=[args.gpu], 
-            find_unused_parameters=True  # Bật để tránh lỗi DDP
+            find_unused_parameters=True
         )
         model_without_ddp = model.module
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
+
+    # Log số tham số lên WandB
+    if not args.distributed or utils.is_main_process():
+        wandb.config.update({"n_parameters": n_parameters})
 
     param_dicts = [
         {"params": [p for n, p in model_without_ddp.named_parameters() if "backbone" not in n and p.requires_grad]},
@@ -147,6 +176,13 @@ def main(args):
 
     dataset_train = build_dataset(image_set='train', args=args)
     dataset_val = build_dataset(image_set='val', args=args)
+
+    # Log dataset size lên WandB
+    if not args.distributed or utils.is_main_process():
+        wandb.config.update({
+            "train_samples": len(dataset_train),
+            "val_samples": len(dataset_val),
+        })
 
     if args.distributed:
         sampler_train = DistributedSampler(dataset_train)
@@ -171,7 +207,7 @@ def main(args):
         from datasets import coco
         dataset_train = coco.build('train', args)
         dataset_val = coco.build('val', args)
-    base_ds = get_coco_api_from_dataset(dataset_val)    
+    base_ds = get_coco_api_from_dataset(dataset_val)
 
     output_dir = Path(args.output_dir)
 
@@ -185,9 +221,9 @@ def main(args):
         state_dict = checkpoint['model']
         
         # Khởi tạo class_embed mới
-        num_classes = args.num_classes  # 3
-        hidden_dim = model_without_ddp.class_embed.weight.size(1)  # 256
-        new_class_embed = torch.nn.Linear(hidden_dim, num_classes + 1)  # [4, 256]
+        num_classes = args.num_classes
+        hidden_dim = model_without_ddp.class_embed.weight.size(1)
+        new_class_embed = torch.nn.Linear(hidden_dim, num_classes + 1)
         new_class_embed.to(device)
         model_without_ddp.class_embed = new_class_embed
         
@@ -213,8 +249,19 @@ def main(args):
     if args.eval:
         test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
                                               data_loader_val, base_ds, device, args.output_dir)
-        if args.output_dir:
+        if args.output_dir and (not args.distributed or utils.is_main_process()):
             utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
+            # Log kết quả đánh giá lên WandB
+            if coco_evaluator is not None:
+                stats = coco_evaluator.coco_eval["bbox"].stats
+                wandb.log({
+                    "eval/AP": stats[0],
+                    "eval/AP50": stats[1],
+                    "eval/AP75": stats[2],
+                    "eval/APs": stats[3],
+                    "eval/APm": stats[4],
+                    "eval/APl": stats[5],
+                })
         return
 
     print("Start training")
@@ -226,9 +273,8 @@ def main(args):
             model, criterion, data_loader_train, optimizer, device, epoch,
             args.clip_max_norm)
         lr_scheduler.step()
-        if args.output_dir:
+        if args.output_dir and (not args.distributed or utils.is_main_process()):
             checkpoint_paths = [output_dir / 'checkpoint.pth']
-            # extra checkpoint before LR drop and every 100 epochs
             if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 100 == 0:
                 checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
             for checkpoint_path in checkpoint_paths:
@@ -239,6 +285,8 @@ def main(args):
                     'epoch': epoch,
                     'args': args,
                 }, checkpoint_path)
+                # Log checkpoint lên WandB
+                wandb.save(str(checkpoint_path))
 
         test_stats, coco_evaluator = evaluate(
             model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
@@ -252,6 +300,23 @@ def main(args):
         if args.output_dir and utils.is_main_process():
             with (output_dir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
+
+            # Log eval stats lên WandB
+            if coco_evaluator is not None:
+                stats = coco_evaluator.coco_eval["bbox"].stats
+                wandb.log({
+                    "epoch": epoch,
+                    "train/loss": train_stats.get("loss", 0.0),
+                    "train/loss_ce": train_stats.get("loss_ce", 0.0),
+                    "train/loss_bbox": train_stats.get("loss_bbox", 0.0),
+                    "train/loss_giou": train_stats.get("loss_giou", 0.0),
+                    "eval/AP": stats[0],
+                    "eval/AP50": stats[1],
+                    "eval/AP75": stats[2],
+                    "eval/APs": stats[3],
+                    "eval/APm": stats[4],
+                    "eval/APl": stats[5],
+                })
 
             # for evaluation logs
             if coco_evaluator is not None:
@@ -267,7 +332,8 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
-
+    if not args.distributed or utils.is_main_process():
+        wandb.log({"training_time_seconds": int(total_time)})
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
