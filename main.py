@@ -19,11 +19,10 @@ import wandb  # Thêm WandB
 import torch.distributed as dist
 import atexit
 import os
-from kaggle_secrets import UserSecretsClient
-
-# Thiết lập WandB API key từ Kaggle Secrets
-user_secrets = UserSecretsClient()
-os.environ["WANDB_API_KEY"] = user_secrets.get_secret("WANDB_API_KEY")
+try:
+    from kaggle_secrets import UserSecretsClient
+except ImportError:
+    print("kaggle_secrets not available, relying on manual WandB login")
 
 def cleanup():
     if dist.is_initialized():
@@ -115,7 +114,7 @@ def get_args_parser():
     parser.add_argument('--world_size', default=1, type=int,
                         help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
-    parser.add_argument('--distributed', action='store_true', help='enable distributed training')  # Thêm
+    parser.add_argument('--distributed', action='store_true', help='enable distributed training')
 
     # WandB parameters
     parser.add_argument('--wandb_project', default='detr-emotic', type=str, help='WandB project name')
@@ -125,17 +124,28 @@ def get_args_parser():
 def main(args):
     # Khởi tạo WandB (chỉ trên rank 0 nếu dùng DDP)
     if not args.distributed or utils.is_main_process():
-        wandb.init(
-            project=args.wandb_project,
-            entity=args.wandb_entity,
-            config=vars(args),  # Log toàn bộ args
-            name=f"detr-r50-emotic-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}",  # Tên run
-        )
-        wandb.config.update({
-            "checkpoint": args.resume,
-            "backbone": args.backbone,
-            "num_classes": args.num_classes,
-        })
+        try:
+            user_secrets = UserSecretsClient()
+            os.environ["WANDB_API_KEY"] = user_secrets.get_secret("WANDB_API_KEY")
+        except Exception as e:
+            print(f"Warning: Could not set WANDB_API_KEY from Kaggle Secrets: {e}")
+            print("Please ensure you have logged in to WandB manually using `wandb login` or set WANDB_API_KEY environment variable.")
+        
+        try:
+            wandb.init(
+                project=args.wandb_project,
+                entity=args.wandb_entity,
+                config=vars(args),  # Log toàn bộ args
+                name=f"detr-r50-emotic-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}",  # Tên run
+            )
+            wandb.config.update({
+                "checkpoint": args.resume,
+                "backbone": args.backbone,
+                "num_classes": args.num_classes,
+            })
+        except Exception as e:
+            print(f"Warning: Failed to initialize WandB: {e}")
+            print("Continuing without WandB logging.")
 
     utils.init_distributed_mode(args)
     print("git:\n  {}\n".format(utils.get_sha()))
@@ -168,7 +178,10 @@ def main(args):
 
     # Log số tham số lên WandB
     if not args.distributed or utils.is_main_process():
-        wandb.config.update({"n_parameters": n_parameters})
+        try:
+            wandb.config.update({"n_parameters": n_parameters})
+        except:
+            pass
 
     param_dicts = [
         {"params": [p for n, p in model_without_ddp.named_parameters() if "backbone" not in n and p.requires_grad]},
@@ -186,10 +199,13 @@ def main(args):
 
     # Log dataset size lên WandB
     if not args.distributed or utils.is_main_process():
-        wandb.config.update({
-            "train_samples": len(dataset_train),
-            "val_samples": len(dataset_val),
-        })
+        try:
+            wandb.config.update({
+                "train_samples": len(dataset_train),
+                "val_samples": len(dataset_val),
+            })
+        except:
+            pass
 
     if args.distributed:
         sampler_train = DistributedSampler(dataset_train)
@@ -202,18 +218,21 @@ def main(args):
         sampler_train, args.batch_size, drop_last=True)
 
     data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
-                                   collate_fn=utils.collate_fn, num_workers=args.num_workers)
+                                                  collate_fn=utils.collate_fn, num_workers=args.num_workers)
     data_loader_val = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
                                  drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
 
     if args.dataset_file == 'emotic':
         from datasets import emotic
-        dataset_train = emotic.build('train', args)
-        dataset_val = emotic.build('val', args)
+        dataset_train = emotic.build(image_set='train', args=args)
+        dataset_val = emotic.build(image_set='val', args=args)
     else:
-        from datasets import coco
-        dataset_train = coco.build('train', args)
-        dataset_val = coco.build('val', args)
+        try:
+            from datasets.coco import build_dataset as coco_build
+        except ImportError:
+            from datasets import coco
+        dataset_train = coco.build(image_set,'train', args=args)
+        dataset_val = coco.build_dataset(image_set=val', args)
     base_ds = get_coco_api_from_dataset(dataset_val)
 
     output_dir = Path(args.output_dir)
@@ -227,14 +246,14 @@ def main(args):
         checkpoint = torch.load(args.resume, map_location='cpu')
         state_dict = checkpoint['model']
         
-        # Khởi tạo class_embed mới
+        # Khởi tạo class_embed
         num_classes = args.num_classes
         hidden_dim = model_without_ddp.class_embed.weight.size(1)
         new_class_embed = torch.nn.Linear(hidden_dim, num_classes + 1)
         new_class_embed.to(device)
         model_without_ddp.class_embed = new_class_embed
         
-        # Loại bỏ class_embed cũ
+        # Loại bỏ class_embed
         state_dict.pop('class_embed.weight', None)
         state_dict.pop('class_embed.bias', None)
         
@@ -243,7 +262,7 @@ def main(args):
         print(f"Missing keys: {missing_keys}")
         print(f"Unexpected keys: {unexpected_keys}")
         
-        # In danh sách tham số
+        # In danh sách
         print("Model parameters:")
         for idx, (name, param) in enumerate(model_without_ddp.named_parameters()):
             print(f"Index {idx}: {name}")
@@ -254,21 +273,29 @@ def main(args):
             args.start_epoch = checkpoint['epoch'] + 1
 
     if args.eval:
-        test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
-                                              data_loader_val, base_ds, device, args.output_dir)
+        test_stats, coco_evaluator = evaluate(
+            model, criterion, postprocessors,
+            data_loader_val, 
+            base_ds, 
+            device, 
+            args.output_dir
+        )
         if args.output_dir and (not args.distributed or utils.is_main_process()):
-            utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
-            # Log kết quả đánh giá lên WandB
-            if coco_evaluator is not None:
-                stats = coco_evaluator.coco_eval["bbox"].stats
-                wandb.log({
-                    "eval/AP": stats[0],
-                    "eval/AP50": stats[1],
-                    "eval/AP75": stats[2],
-                    "eval/APs": stats[3],
-                    "eval/APm": stats[4],
-                    "eval/APl": stats[5],
-                })
+            try:
+                utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
+                # Log kết quả
+                if coco_evaluator is not None:
+                    stats = coco_evaluator.coco_eval["bbox"].stats
+                    wandb.log({
+                        "eval/AP": stats[0],
+                        "eval/AP50": stats[0],
+                        'eval/AP75': stats[2],
+                        'eval/APs': stats[3],
+                        'eval/APm': stats[4],
+                        'eval/APl': stats[5],
+                    })
+            except Exception as e:
+                print(f"Warning: Failed to log eval to results to WandB: {e}")
         return
 
     print("Start training")
@@ -277,13 +304,16 @@ def main(args):
         if args.distributed:
             sampler_train.set_epoch(epoch)
         train_stats = train_one_epoch(
-            model, criterion, data_loader_train, optimizer, device, epoch,
+            model, criterion, data_loader_train, 
+            optimizer, 
+            device, 
+            epoch,
             args.clip_max_norm)
         lr_scheduler.step()
         if args.output_dir and (not args.distributed or utils.is_main_process()):
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 100 == 0:
-                checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
+                checkpoint_paths.append(checkpoint_path / f'checkpoint{epoch:04}')
             for checkpoint_path in checkpoint_paths:
                 utils.save_on_master({
                     'model': model_without_ddp.state_dict(),
@@ -292,8 +322,11 @@ def main(args):
                     'epoch': epoch,
                     'args': args,
                 }, checkpoint_path)
-                # Log checkpoint lên WandB
-                wandb.save(str(checkpoint_path))
+                # Log checkpoint
+                try:
+                    wandb.save(str(checkpoint_path))
+                except:
+                    pass
 
         test_stats, coco_evaluator = evaluate(
             model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
@@ -309,21 +342,24 @@ def main(args):
                 f.write(json.dumps(log_stats) + "\n")
 
             # Log eval stats lên WandB
-            if coco_evaluator is not None:
-                stats = coco_evaluator.coco_eval["bbox"].stats
-                wandb.log({
-                    "epoch": epoch,
-                    "train/loss": train_stats.get("loss", 0.0),
-                    "train/loss_ce": train_stats.get("loss_ce", 0.0),
-                    "train/loss_bbox": train_stats.get("loss_bbox", 0.0),
-                    "train/loss_giou": train_stats.get("loss_giou", 0.0),
-                    "eval/AP": stats[0],
-                    "eval/AP50": stats[1],
-                    "eval/AP75": stats[2],
-                    "eval/APs": stats[3],
-                    "eval/APm": stats[4],
-                    "eval/APl": stats[5],
-                })
+            try:
+                if coco_evaluator is not None:
+                    stats = coco_evaluator.coco_eval["bbox"].stats
+                    wandb.log({
+                        "epoch": epoch,
+                        "train/loss": train_stats.get("loss", 0.0),
+                        "train/loss_ce": train_stats.get("loss_ce", 0.0),
+                        "train/loss_bbox": train_stats.get("loss_bbox", 0.0),
+                        "train/loss_giou": train_stats.get("loss_giou", 0.0),
+                        "eval/AP": stats[0],
+                        "eval/AP50": stats[1],
+                        "eval/AP75": stats[2],
+                        "eval/APs": stats[3],
+                        "eval/APm": stats[4],
+                        "eval/APl": stats[5],
+                    })
+            except Exception as e:
+                print(f"Warning: Failed to log eval stats to WandB: {e}")
 
             # for evaluation logs
             if coco_evaluator is not None:
@@ -331,7 +367,7 @@ def main(args):
                 if "bbox" in coco_evaluator.coco_eval:
                     filenames = ['latest.pth']
                     if epoch % 50 == 0:
-                        filenames.append(f'{epoch:03}.pth')
+                        filenames.append(f'{epoch:03d}.pth')
                     for name in filenames:
                         torch.save(coco_evaluator.coco_eval["bbox"].eval,
                                    output_dir / "eval" / name)
@@ -340,7 +376,10 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
     if not args.distributed or utils.is_main_process():
-        wandb.log({"training_time_seconds": int(total_time)})
+        try:
+            wandb.log({"training_time_seconds": int(total_time)})
+        except:
+            pass
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
