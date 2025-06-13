@@ -24,6 +24,7 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=2, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=300, type=int)
+    parser.add_argument('--num_classes', default=3, type=int, help='number of classes (excluding background)')
     parser.add_argument('--lr_drop', default=200, type=int)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
@@ -167,18 +168,32 @@ def main(args):
         dataset_val = coco.build('val', args)
         base_ds = get_coco_api_from_dataset(dataset_val)    
 
+    output_dir = Path(args.output_dir)
+
+    # Tải checkpoint
     if args.frozen_weights is not None:
         checkpoint = torch.load(args.frozen_weights, map_location='cpu')
-        model_without_ddp.detr.load_state_dict(checkpoint['model'],strict=False)
+        model_without_ddp.detr.load_state_dict(checkpoint['model'], strict=False)
 
-    output_dir = Path(args.output_dir)
     if args.resume:
-        if args.resume.startswith('https'):
-            checkpoint = torch.hub.load_state_dict_from_url(
-                args.resume, map_location='cpu', check_hash=True)
-        else:
-            checkpoint = torch.load(args.resume, map_location='cpu')
-        model_without_ddp.load_state_dict(checkpoint['model'], strict=False)
+        checkpoint = torch.load(args.resume, map_location='cpu')
+        state_dict = checkpoint['model']
+        
+        # Khởi tạo class_embed mới cho num_classes=3
+        num_classes = args.num_classes  # 3
+        hidden_dim = model_without_ddp.class_embed.weight.size(1)  # 256
+        new_class_embed = torch.nn.Linear(hidden_dim, num_classes + 1)  # [4, 256]
+        model_without_ddp.class_embed = new_class_embed
+        
+        # Loại bỏ class_embed cũ
+        state_dict.pop('class_embed.weight', None)
+        state_dict.pop('class_embed.bias', None)
+        
+        # Tải state_dict
+        missing_keys, unexpected_keys = model_without_ddp.load_state_dict(state_dict, strict=False)
+        print(f"Missing keys: {missing_keys}")
+        print(f"Unexpected keys: {unexpected_keys}")
+        
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer'])
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
