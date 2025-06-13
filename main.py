@@ -18,6 +18,12 @@ from models import build_model
 import wandb  # Thêm WandB
 import torch.distributed as dist
 import atexit
+import os
+from kaggle_secrets import UserSecretsClient
+
+# Thiết lập WandB API key từ Kaggle Secrets
+user_secrets = UserSecretsClient()
+os.environ["WANDB_API_KEY"] = user_secrets.get_secret("WANDB_API_KEY")
 
 def cleanup():
     if dist.is_initialized():
@@ -109,7 +115,8 @@ def get_args_parser():
     parser.add_argument('--world_size', default=1, type=int,
                         help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
-    
+    parser.add_argument('--distributed', action='store_true', help='enable distributed training')  # Thêm
+
     # WandB parameters
     parser.add_argument('--wandb_project', default='detr-emotic', type=str, help='WandB project name')
     parser.add_argument('--wandb_entity', default=None, type=str, help='WandB entity (username or team)')
