@@ -120,9 +120,10 @@ def main(args):
     random.seed(seed)
 
     model, criterion, postprocessors = build_model(args)
+    model_without_ddp = model
     model.to(device)
 
-    model_without_ddp = model
+
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
@@ -183,6 +184,7 @@ def main(args):
         num_classes = args.num_classes  # 3
         hidden_dim = model_without_ddp.class_embed.weight.size(1)  # 256
         new_class_embed = torch.nn.Linear(hidden_dim, num_classes + 1)  # [4, 256]
+        new_class_embed.to(device)  # Chuyển class_embed lên GPU
         model_without_ddp.class_embed = new_class_embed
         
         # Loại bỏ class_embed cũ
