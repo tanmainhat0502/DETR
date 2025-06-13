@@ -58,7 +58,7 @@ def get_args_parser():
     parser.add_argument('--pre_norm', action='store_true')
 
     # * Segmentation
-    parser.add_argument('--masks', action='store_true',
+    parser.add_argument('--masks', default=False, action='store_true',
                         help="Train segmentation head if the flag is provided")
 
     # Loss
@@ -125,7 +125,11 @@ def main(args):
 
 
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        model = torch.nn.parallel.DistributedDataParallel(
+            model, 
+            device_ids=[args.gpu], 
+            find_unused_parameters=True  # Bật để tránh lỗi DDP
+        )
         model_without_ddp = model.module
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
@@ -180,11 +184,11 @@ def main(args):
         checkpoint = torch.load(args.resume, map_location='cpu')
         state_dict = checkpoint['model']
         
-        # Khởi tạo class_embed mới cho num_classes=3
+        # Khởi tạo class_embed mới
         num_classes = args.num_classes  # 3
         hidden_dim = model_without_ddp.class_embed.weight.size(1)  # 256
         new_class_embed = torch.nn.Linear(hidden_dim, num_classes + 1)  # [4, 256]
-        new_class_embed.to(device)  # Chuyển class_embed lên GPU
+        new_class_embed.to(device)
         model_without_ddp.class_embed = new_class_embed
         
         # Loại bỏ class_embed cũ
@@ -195,6 +199,11 @@ def main(args):
         missing_keys, unexpected_keys = model_without_ddp.load_state_dict(state_dict, strict=False)
         print(f"Missing keys: {missing_keys}")
         print(f"Unexpected keys: {unexpected_keys}")
+        
+        # In danh sách tham số
+        print("Model parameters:")
+        for idx, (name, param) in enumerate(model_without_ddp.named_parameters()):
+            print(f"Index {idx}: {name}")
         
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer'])
