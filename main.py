@@ -226,13 +226,6 @@ def main(args):
         from datasets import emotic
         dataset_train = emotic.build(image_set='train', args=args)
         dataset_val = emotic.build(image_set='val', args=args)
-    else:
-        try:
-            from datasets.coco import build_dataset as coco_build
-        except ImportError:
-            from datasets import coco
-        dataset_train = coco.build(image_set,'train', args=args)
-        dataset_val = coco.build_dataset(image_set=val', args)
     base_ds = get_coco_api_from_dataset(dataset_val)
 
     output_dir = Path(args.output_dir)
