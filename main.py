@@ -25,10 +25,12 @@ except ImportError:
     print("kaggle_secrets not available, relying on manual WandB login")
 
 def cleanup():
-    if dist.is_initialized():
-        dist.destroy_process_group()
-    if not utils.is_dist_avail_and_initialized() or utils.is_main_process():
-        wandb.finish()  # Kết thúc WandB run khi thoát
+    try:
+        if wandb.run is not None:
+            wandb.finish()
+    except Exception as e:
+        print(f"Warning: Failed to finish WandB run: {e}")
+
 atexit.register(cleanup)
 
 def get_args_parser():
@@ -123,31 +125,18 @@ def get_args_parser():
     return parser
 
 
-def cleanup():
-    try:
-        wandb.finish()
-    except Exception as e:
-        print(f"Warning: Failed to finish WandB run: {e}")
-
 def main(args):
-    # Khởi tạo WandB (chỉ trên rank 0 nếu dùng DDP)
+    utils.init_distributed_mode(args)
+
     if utils.is_main_process():
         wandb.init(
-        project=args.wandb_project,
-        name=args.wandb_name if args.wandb_name else f"run-{int(time.time())}",
-        config=vars(args)
-    )
-
-    utils.init_distributed_mode(args)
-    # print("git:\n  {}\n".format(utils.get_sha()))
-
-    if args.frozen_weights is not None:
-        assert args.masks, "Frozen training is meant for segmentation only"
-    print(args)
+            project=args.wandb_project,
+            name=args.wandb_name if args.wandb_name else f"run-{int(time.time())}",
+            config=vars(args)
+        )
 
     device = torch.device(args.device)
 
-    # fix the seed for reproducibility
     seed = args.seed + utils.get_rank()
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -365,6 +354,14 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
     args = parser.parse_args()
+    n_gpu = torch.cuda.device_count()
+    if n_gpu > 1:
+        args.distributed = True
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(i) for i in range(n_gpu))
+    else:
+        args.distributed = False
+        args.gpu = 0
+
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     main(args)
