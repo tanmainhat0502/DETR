@@ -1,4 +1,4 @@
-!python main.py \
+!python -m torch.distributed.launch --nproc_per_node=2 --use_env main.py \
     --coco_path /kaggle/working/data4training \
     --output_dir run \
     --batch_size 4 \
@@ -6,5 +6,6 @@
     --resume /kaggle/working/detr-r50-e632da11.pth \
     --dataset_file emotic \
     --num_classes 3 \
+    --distributed \
     --wandb_project detr-emotic \
     --wandb_entity tanmnse170507-fpt-university
