@@ -280,7 +280,7 @@ def main(args):
             optimizer, 
             device, 
             epoch,
-            args.clip_max_norm, use_amp=True)
+            args.clip_max_norm)
         lr_scheduler.step()
         torch.cuda.empty_cache()
         
