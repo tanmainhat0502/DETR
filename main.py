@@ -28,6 +28,7 @@ def cleanup():
     try:
         if wandb.run is not None:
             wandb.finish()
+            time.sleep(5)  # giữ kết nối thêm vài giây trước khi thoát
     except Exception as e:
         print(f"Warning: Failed to finish WandB run: {e}")
 
