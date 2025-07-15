@@ -259,8 +259,8 @@ def main(args):
                 if coco_evaluator is not None:
                     stats = coco_evaluator.coco_eval["bbox"].stats
                     wandb.log({
-                        "eval/AP": stats[0],
-                        "eval/AP50": stats[0],
+                        "eval/mAP@50:95": stats[0],
+                        "eval/mAP@50": stats[1],
                         'eval/AP75': stats[2],
                         'eval/APs': stats[3],
                         'eval/APm': stats[4],
@@ -280,8 +280,10 @@ def main(args):
             optimizer, 
             device, 
             epoch,
-            args.clip_max_norm)
+            args.clip_max_norm, use_amp=True)
         lr_scheduler.step()
+        torch.cuda.empty_cache()
+        
         if args.output_dir and (not args.distributed or utils.is_main_process()):
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 100 == 0:
