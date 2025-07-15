@@ -12,7 +12,7 @@ import torchvision
 from pycocotools import mask as coco_mask
 
 import datasets.transforms as T
-
+import os
 
 class CocoDetection(torchvision.datasets.CocoDetection):
     def __init__(self, img_folder, ann_file, transforms, return_masks):
@@ -161,9 +161,8 @@ def build(image_set, args):
     root = Path(args.coco_path)
     assert root.exists(), f'provided COCO path {root} does not exist'
     PATHS = {
-        "train": (root / "images" / "train", root / "json_folder" / "emotic_train.json"),
-        "val": (root / "images" / "val", root / "json_folder" / "emotic_val.json"),
-        "test": (root / "images" / "test", root / "json_folder" / "emotic_test.json"),
+        "train": (os.path.join(root, "train2017"), os.path.join(root, "annotations", "instances_train2017.json")),
+        "val": (os.path.join(root, "val2017"), os.path.join(root, "annotations", "instances_val2017.json")),
     }
     img_folder, ann_file = PATHS[image_set]
     assert img_folder.exists(), f'Image folder {img_folder} does not exist'
