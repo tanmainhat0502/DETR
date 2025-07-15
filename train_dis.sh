@@ -8,4 +8,4 @@
     --num_classes 3 \
     --distributed \
     --wandb_project detr-emotic \
-    --wandb_entity tanmnse170507-fpt-university
+    --wandb_name tanmnse170507-fpt-university

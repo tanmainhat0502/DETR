@@ -118,37 +118,28 @@ def get_args_parser():
 
     # WandB parameters
     parser.add_argument('--wandb_project', default='detr-emotic', type=str, help='WandB project name')
-    parser.add_argument('--wandb_entity', default=None, type=str, help='WandB entity (username or team)')
+    parser.add_argument('--wandb_name', default=None, type=str,
+                    help="Custom name for wandb run")
     return parser
+
+
+def cleanup():
+    try:
+        wandb.finish()
+    except Exception as e:
+        print(f"Warning: Failed to finish WandB run: {e}")
 
 def main(args):
     # Khởi tạo WandB (chỉ trên rank 0 nếu dùng DDP)
-    if not args.distributed or utils.is_main_process():
-        try:
-            user_secrets = UserSecretsClient()
-            os.environ["WANDB_API_KEY"] = user_secrets.get_secret("wandb")
-        except Exception as e:
-            print(f"Warning: Could not set WANDB_API_KEY from Kaggle Secrets: {e}")
-            print("Please ensure you have logged in to WandB manually using `wandb login` or set WANDB_API_KEY environment variable.")
-        
-        try:
-            wandb.init(
-                project=args.wandb_project,
-                entity=args.wandb_entity,
-                config=vars(args),  # Log toàn bộ args
-                name=f"detr-r50-emotic-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}",  # Tên run
-            )
-            wandb.config.update({
-                "checkpoint": args.resume,
-                "backbone": args.backbone,
-                "num_classes": args.num_classes,
-            })
-        except Exception as e:
-            print(f"Warning: Failed to initialize WandB: {e}")
-            print("Continuing without WandB logging.")
+    if utils.is_main_process():
+        wandb.init(
+        project=args.wandb_project,
+        name=args.wandb_name if args.wandb_name else f"run-{int(time.time())}",
+        config=vars(args)
+    )
 
     utils.init_distributed_mode(args)
-    print("git:\n  {}\n".format(utils.get_sha()))
+    # print("git:\n  {}\n".format(utils.get_sha()))
 
     if args.frozen_weights is not None:
         assert args.masks, "Frozen training is meant for segmentation only"
@@ -176,13 +167,11 @@ def main(args):
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
 
-    # Log số tham số lên WandB
-    if not args.distributed or utils.is_main_process():
-        try:
-            wandb.config.update({"n_parameters": n_parameters})
-        except:
-            pass
-
+    try:
+        wandb.config.update({"n_parameters": n_parameters})
+    except Exception as e:
+        print(f"Warning: Failed to log n_parameters to WandB: {e}")
+        
     param_dicts = [
         {"params": [p for n, p in model_without_ddp.named_parameters() if "backbone" not in n and p.requires_grad]},
         {

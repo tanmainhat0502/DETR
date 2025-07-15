@@ -1,4 +1,4 @@
-python main.py \
+python3 main.py \
     --coco_path /root/DETR/data4training \
     --output_dir run \
     --batch_size 4 \
@@ -7,4 +7,4 @@ python main.py \
     --dataset_file emotic \
     --num_classes 3 \
     --wandb_project detr-emotic \
-    --wandb_entity tanmnse170507-fpt-university
+    --wandb_name tanmnse170507-fpt-university
