@@ -1,9 +1,9 @@
 !python main.py \
-    --coco_path /kaggle/working/data4training \
+    --coco_path /root/DETR/data4training \
     --output_dir run \
     --batch_size 4 \
     --epochs 1 \
-    --resume /kaggle/working/detr-r50-e632da11.pth \
+    --resume /root/DETR/DETR/detr-r50-e632da11.pth \
     --dataset_file emotic \
     --num_classes 3 \
     --wandb_project detr-emotic \
