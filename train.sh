@@ -1,4 +1,4 @@
-!python main.py \
+python main.py \
     --coco_path /root/DETR/data4training \
     --output_dir run \
     --batch_size 4 \
