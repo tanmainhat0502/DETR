@@ -171,7 +171,7 @@ def main(args):
         wandb.config.update({"n_parameters": n_parameters})
     except Exception as e:
         print(f"Warning: Failed to log n_parameters to WandB: {e}")
-        
+
     param_dicts = [
         {"params": [p for n, p in model_without_ddp.named_parameters() if "backbone" not in n and p.requires_grad]},
         {
@@ -357,11 +357,10 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
-    if not args.distributed or utils.is_main_process():
-        try:
-            wandb.log({"training_time_seconds": int(total_time)})
-        except:
-            pass
+    try:
+        wandb.log({"training_time_seconds": int(total_time)})
+    except Exception as e:
+        print(f"Warning: Failed to log training time to WandB: {e}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
