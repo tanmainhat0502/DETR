@@ -24,7 +24,13 @@ try:
 except ImportError:
     print("kaggle_secrets not available, relying on manual WandB login")
 
-
+@atexit.register
+def cleanup_wandb():
+    if utils.is_main_process() and wandb.run is not None:
+        try:
+            wandb.finish()
+        except Exception as e:
+            print(f"[WARN] wandb.finish() failed: {e}")
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
