@@ -281,15 +281,19 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             sampler_train.set_epoch(epoch)
+
+        # Train
         train_stats = train_one_epoch(
             model, criterion, data_loader_train, 
-            optimizer, 
-            device, 
-            epoch,
-            args.clip_max_norm)
+            optimizer, device, epoch,
+            args.clip_max_norm
+        )
+
+        # Update learning rate
         lr_scheduler.step()
         torch.cuda.empty_cache()
-        
+
+        # Save checkpoint
         if args.output_dir and (not args.distributed or utils.is_main_process()):
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 100 == 0:
@@ -302,70 +306,77 @@ def main(args):
                     'epoch': epoch,
                     'args': args,
                 }, checkpoint_path)
-                # Log checkpoint
-                try:
-                    wandb.save(str(checkpoint_path))
-                except:
-                    pass
 
+        # Evaluate
         test_stats, coco_evaluator = evaluate(
-            model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
+            model, criterion, postprocessors, 
+            data_loader_val, base_ds, device, args.output_dir
         )
 
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                     **{f'test_{k}': v for k, v in test_stats.items()},
-                     'epoch': epoch,
-                     'n_parameters': n_parameters}
+        # Tổng hợp tất cả log stats để ghi file log.txt
+        log_stats = {
+            **{f'train_{k}': v for k, v in train_stats.items()},
+            **{f'test_{k}': v for k, v in test_stats.items()},
+            'epoch': epoch,
+            'n_parameters': n_parameters
+        }
 
+        if utils.is_main_process():
+            # Log training loss lên wandb
+            wandb.log({f"train/{k}": v for k, v in train_stats.items()}, step=epoch)
+
+            # Log test loss (không bao gồm coco_eval_bbox)
+            wandb.log({f"val_loss/{k}": v for k, v in test_stats.items() if k != 'coco_eval_bbox'}, step=epoch)
+
+            # Log coco_eval metrics nếu có
+            coco_metrics = test_stats.get("coco_eval_bbox", [0] * 12)
+            coco_eval_log = {
+                'coco_eval/AP@[IoU=0.50:0.95]': coco_metrics[0],
+                'coco_eval/AP@[IoU=0.50]': coco_metrics[1],
+                'coco_eval/AP@[IoU=0.75]': coco_metrics[2],
+                'coco_eval/AP@[IoU=0.50:0.95]-small': coco_metrics[3],
+                'coco_eval/AP@[IoU=0.50:0.95]-medium': coco_metrics[4],
+                'coco_eval/AP@[IoU=0.50:0.95]-large': coco_metrics[5],
+                'coco_eval/AR@[IoU=0.50:0.95]-1': coco_metrics[6],
+                'coco_eval/AR@[IoU=0.50:0.95]-10': coco_metrics[7],
+                'coco_eval/AR@[IoU=0.50:0.95]-100': coco_metrics[8],
+                'coco_eval/AR@[IoU=0.50:0.95]-small': coco_metrics[9],
+                'coco_eval/AR@[IoU=0.50:0.95]-medium': coco_metrics[10],
+                'coco_eval/AR@[IoU=0.50:0.95]-large': coco_metrics[11],
+            }
+            wandb.log(coco_eval_log, step=epoch)
+
+            # Log meta data
+            wandb.log({
+                'meta/epoch': epoch,
+                'meta/n_parameters': n_parameters
+            }, step=epoch)
+
+        # Ghi log ra file log.txt
         if args.output_dir and utils.is_main_process():
             with (output_dir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
 
-            # Log eval stats lên WandB
-            try:
-                if coco_evaluator is not None:
-                    stats = coco_evaluator.coco_eval["bbox"].stats
-                    wandb.log({
-                        "epoch": epoch,
-                        "train/loss": train_stats.get("loss", 0.0),
-                        "train/loss_ce": train_stats.get("loss_ce", 0.0),
-                        "train/loss_bbox": train_stats.get("loss_bbox", 0.0),
-                        "train/loss_giou": train_stats.get("loss_giou", 0.0),
-
-                        "coco_eval/AP@[IoU=0.50:0.95]": stats[0],
-                        "coco_eval/AP@[IoU=0.50]": stats[1],
-                        "coco_eval/AP@[IoU=0.75]": stats[2],
-                        "coco_eval/AP@[IoU=0.50:0.95]-small": stats[3],
-                        "coco_eval/AP@[IoU=0.50:0.95]-medium": stats[4],
-                        "coco_eval/AP@[IoU=0.50:0.95]-large": stats[5],
-                        "coco_eval/AR@[IoU=0.50:0.95]-1": stats[6],
-                        "coco_eval/AR@[IoU=0.50:0.95]-10": stats[7],
-                        "coco_eval/AR@[IoU=0.50:0.95]-100": stats[8],
-                        "coco_eval/AR@[IoU=0.50:0.95]-small": stats[9],
-                        "coco_eval/AR@[IoU=0.50:0.95]-medium": stats[10],
-                        "coco_eval/AR@[IoU=0.50:0.95]-large": stats[11],
-                    })
-            except Exception as e:
-                print(f"Warning: Failed to log eval stats to WandB: {e}")
-
-            # for evaluation logs
+            # Lưu thông tin eval
             if coco_evaluator is not None:
                 (output_dir / 'eval').mkdir(exist_ok=True)
                 if "bbox" in coco_evaluator.coco_eval:
                     filenames = ['latest.pth']
                     if epoch % 50 == 0:
-                        filenames.append(f'{epoch:03d}.pth')
+                        filenames.append(f'{epoch:03}.pth')
                     for name in filenames:
-                        torch.save(coco_evaluator.coco_eval["bbox"].eval,
-                                   output_dir / "eval" / name)
+                        torch.save(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval" / name)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
-    try:
-        wandb.log({"training_time_seconds": int(total_time)})
-    except Exception as e:
-        print(f"Warning: Failed to log training time to WandB: {e}")
+
+    if utils.is_main_process():
+        try:
+            wandb.log({"training_time_seconds": int(total_time)})
+        except Exception as e:
+            print(f"Warning: Failed to log training time to WandB: {e}")
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
