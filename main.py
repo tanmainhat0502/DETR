@@ -24,6 +24,9 @@ try:
 except ImportError:
     print("kaggle_secrets not available, relying on manual WandB login")
 
+local_rank = int(os.environ["LOCAL_RANK"])
+torch.cuda.set_device(local_rank)
+
 @atexit.register
 def cleanup_wandb():
     if utils.is_main_process() and wandb.run is not None:
@@ -320,8 +323,7 @@ def main(args):
         }
 
         if utils.is_main_process():
-            print("HI")
-            exit()
+
             # Log training loss lên wandb
             wandb.log({f"train/{k}": v for k, v in train_stats.items()}, step=epoch)
 
