@@ -320,6 +320,8 @@ def main(args):
         }
 
         if utils.is_main_process():
+            print("HI")
+            exit()
             # Log training loss lên wandb
             wandb.log({f"train/{k}": v for k, v in train_stats.items()}, step=epoch)
 
