@@ -1,9 +1,9 @@
 python3 -m torch.distributed.launch --nproc_per_node=2 --use_env main.py \
-    --coco_path /kaggle/working/data4training \
+    --coco_path /workspace/data4training \
     --output_dir run \
     --batch_size 4 \
     --epochs 1 \
-    --resume /kaggle/working/detr-r50-e632da11.pth \
+    --resume /workspace/detr-r50-e632da11.pth \
     --dataset_file emotic \
     --num_classes 3 \
     --distributed \
