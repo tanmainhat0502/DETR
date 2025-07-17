@@ -24,15 +24,7 @@ try:
 except ImportError:
     print("kaggle_secrets not available, relying on manual WandB login")
 
-def cleanup():
-    try:
-        if wandb.run is not None:
-            wandb.finish()
-            time.sleep(5)  # giữ kết nối thêm vài giây trước khi thoát
-    except Exception as e:
-        print(f"Warning: Failed to finish WandB run: {e}")
 
-atexit.register(cleanup)
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
@@ -391,13 +383,5 @@ if __name__ == '__main__':
 
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-        
-    if utils.is_main_process():
-        try:
-            wandb.finish()
-        except Exception as e:
-            print(f"Warning: Failed to finish WandB run: {e}")
 
-    if args.distributed:
-        dist.destroy_process_group()
     main(args)
