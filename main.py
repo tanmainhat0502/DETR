@@ -326,19 +326,18 @@ def main(args):
                         "train/loss_bbox": train_stats.get("loss_bbox", 0.0),
                         "train/loss_giou": train_stats.get("loss_giou", 0.0),
 
-                        "eval/AP": stats[0],           # = coco_metrics[0]
-                        "eval/AP50": stats[1],         # = coco_metrics[1]
-                        "eval/AP75": stats[2],         # = coco_metrics[2]
-                        "eval/APs": stats[3],          # = coco_metrics[3]
-                        "eval/APm": stats[4],          # = coco_metrics[4]
-                        "eval/APl": stats[5],          # = coco_metrics[5]
-
-                        "eval/AR1": stats[6],          # = coco_metrics[6]
-                        "eval/AR10": stats[7],         # = coco_metrics[7]
-                        "eval/AR100": stats[8],        # = coco_metrics[8]
-                        "eval/ARs": stats[9],          # = coco_metrics[9]
-                        "eval/ARm": stats[10],         # = coco_metrics[10]
-                        "eval/ARl": stats[11],         # = coco_metrics[11]
+                        "coco_eval/AP@[IoU=0.50:0.95]": stats[0],
+                        "coco_eval/AP@[IoU=0.50]": stats[1],
+                        "coco_eval/AP@[IoU=0.75]": stats[2],
+                        "coco_eval/AP@[IoU=0.50:0.95]-small": stats[3],
+                        "coco_eval/AP@[IoU=0.50:0.95]-medium": stats[4],
+                        "coco_eval/AP@[IoU=0.50:0.95]-large": stats[5],
+                        "coco_eval/AR@[IoU=0.50:0.95]-1": stats[6],
+                        "coco_eval/AR@[IoU=0.50:0.95]-10": stats[7],
+                        "coco_eval/AR@[IoU=0.50:0.95]-100": stats[8],
+                        "coco_eval/AR@[IoU=0.50:0.95]-small": stats[9],
+                        "coco_eval/AR@[IoU=0.50:0.95]-medium": stats[10],
+                        "coco_eval/AR@[IoU=0.50:0.95]-large": stats[11],
                     })
             except Exception as e:
                 print(f"Warning: Failed to log eval stats to WandB: {e}")
