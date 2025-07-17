@@ -391,4 +391,13 @@ if __name__ == '__main__':
 
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+        
+    if utils.is_main_process():
+        try:
+            wandb.finish()
+        except Exception as e:
+            print(f"Warning: Failed to finish WandB run: {e}")
+
+    if args.distributed:
+        dist.destroy_process_group()
     main(args)
