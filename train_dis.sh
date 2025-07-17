@@ -9,4 +9,4 @@ python3 -m torch.distributed.launch --nproc_per_node=2 --use_env main.py \
     --distributed \
     --lr_drop 1 \
     --wandb_project YOlos-Detection \
-    --wandb_name detr_log_fixed_today
+    --wandb_name detr_log_fixed_today_sever
