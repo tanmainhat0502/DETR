@@ -259,12 +259,18 @@ def main(args):
                 if coco_evaluator is not None:
                     stats = coco_evaluator.coco_eval["bbox"].stats
                     wandb.log({
-                        "eval/mAP@50:95": stats[0],
-                        "eval/mAP@50": stats[1],
-                        'eval/AP75': stats[2],
-                        'eval/APs': stats[3],
-                        'eval/APm': stats[4],
-                        'eval/APl': stats[5],
+                        'coco_eval/AP@[IoU=0.50:0.95]': stats[0],
+                        'coco_eval/AP@[IoU=0.50]': stats[1],
+                        'coco_eval/AP@[IoU=0.75]': stats[2],
+                        'coco_eval/AP@[IoU=0.50:0.95]-small': stats[3],
+                        'coco_eval/AP@[IoU=0.50:0.95]-medium': stats[4],
+                        'coco_eval/AP@[IoU=0.50:0.95]-large': stats[5],
+                        'coco_eval/AR@[IoU=0.50:0.95]-1': stats[6],
+                        'coco_eval/AR@[IoU=0.50:0.95]-10': stats[7],
+                        'coco_eval/AR@[IoU=0.50:0.95]-100': stats[8],
+                        'coco_eval/AR@[IoU=0.50:0.95]-small': stats[9],
+                        'coco_eval/AR@[IoU=0.50:0.95]-medium': stats[10],
+                        'coco_eval/AR@[IoU=0.50:0.95]-large': stats[11],
                     })
             except Exception as e:
                 print(f"Warning: Failed to log eval to results to WandB: {e}")
